@@ -1,6 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Update Me
 
 Globals:
   Api:
@@ -12,7 +11,12 @@ Resources:
   ApiGatewayApi:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: Staging
+      StageName: Prod
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: GatewayAuthorization
     BinaryMediaTypes:
       - application~1pdf
     # BinaryMediaTypes:
@@ -24,7 +28,6 @@ Resources:
   # Define the consumer Lambda function and EventBridge rule
   PdfFunction:
     Type: AWS::Serverless::Function
-    Description: Invoked by EventBridge scheduled rule
     Properties:
       CodeUri: src/
       Handler: app.handler
@@ -34,19 +37,24 @@ Resources:
 
       Layers:
         - !Sub 'arn:aws:lambda:${AWS::Region}:764866452798:layer:chrome-aws-lambda:22'
-      Environment:
-        Variables:
-          EXAMPLE_ENV: 'CHANGE_THIS'
+      # Environment:
+      #   Variables:
+      #     EXAMPLE_ENV: 'CHANGE_THIS'
       Events:
         ApiEvent:
           Type: Api
           Properties:
             Path: /pdf
             Method: post
+            Auth:
+              ApiKeyRequired: true
             RestApiId:
               Ref: ApiGatewayApi
 Outputs:
   ApiGatewayApi:
-    Description: API Gateway endpoint URL for Staging stage for Hello World function
+    Description: "The URL is:"
     Value:
-      Fn::Sub: https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Staging/
+      Fn::Sub: https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  ApiKey:
+    Description: "You can find your API Key in the AWS console: (Put in the request HEADER as 'x-api-key')"
+    Value: !Sub "https://console.aws.amazon.com/apigateway/home?region=${AWS::Region}#/api-keys/"
