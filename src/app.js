@@ -28,20 +28,11 @@ exports.handler = async (event, context) => {
 
     console.log('Sending HTML content to browser:')
     await page.setContent(event.body)
-    await page.setViewport({
-      width: 1080,
-      height: 1600,
-      deviceScaleFactor: 1,
-      isLandscape: true,
-    })
+
     pdf = await page.pdf({
       format: 'a4',
-      margin: {
-        top: '0px',
-        right: '0px',
-        bottom: '0px',
-        left: '0px',
-      },
+      printBackground: true,
+      scale: 1 / 0.75,
     })
     console.log('Done writing PDF.')
 
