@@ -53,11 +53,24 @@ const VIEWPORT = {
   width: 1920,
 }
 
-// Callers (main-api invoices) depend on these exact options for the PDF layout.
-const PDF_OPTIONS = {
-  format: 'a4',
-  printBackground: true,
-  scale: 1 / 0.75,
+// Request header that picks the page sizing; values other than those in PDF_OPTIONS_BY_PAGE_SIZE get a 400.
+const PAGE_SIZE_HEADER = 'x-pdf-page-size'
+
+const PDF_OPTIONS_BY_PAGE_SIZE = {
+  // No header: callers (main-api invoices) depend on these exact options for the PDF layout.
+  default: {
+    format: 'a4',
+    printBackground: true,
+    scale: 1 / 0.75,
+  },
+  // The HTML's CSS @page rules decide size, orientation, margins and margin boxes (page x of y).
+  // format only applies when the HTML declares no @page size (puppeteer would otherwise use Letter).
+  css: {
+    format: 'a4',
+    printBackground: true,
+    preferCSSPageSize: true,
+    displayHeaderFooter: false,
+  },
 }
 
 chromium.setGraphicsMode = false
@@ -69,6 +82,19 @@ function errorResponse(statusCode, errorCode, message, requestId) {
     isBase64Encoded: false,
     body: JSON.stringify({ errorCode, message, requestId }),
   }
+}
+
+function readPageSize(event) {
+  const headers = event?.headers ?? {}
+  const name = Object.keys(headers).find((key) => key.toLowerCase() === PAGE_SIZE_HEADER)
+  if (name === undefined) {
+    return { pageSize: 'default' }
+  }
+  const value = String(headers[name]).trim().toLowerCase()
+  if (value === 'default' || !Object.hasOwn(PDF_OPTIONS_BY_PAGE_SIZE, value)) {
+    return { error: 'INVALID_PAGE_SIZE' }
+  }
+  return { pageSize: value }
 }
 
 function readHtml(event) {
@@ -83,7 +109,7 @@ function readHtml(event) {
   return { html, bytes }
 }
 
-async function renderPdf(html) {
+async function renderPdf(html, pdfOptions) {
   let browser = null
   let blockedRequests = 0
   let fontRequests = 0
@@ -111,7 +137,7 @@ async function renderPdf(html) {
       }
     })
     await page.setContent(html)
-    const pdf = await page.pdf(PDF_OPTIONS)
+    const pdf = await page.pdf(pdfOptions)
     return { pdf: Buffer.from(pdf), blockedRequests, fontRequests }
   } finally {
     if (browser !== null) {
@@ -124,6 +150,12 @@ export const handler = async (event, context) => {
   const requestId = context?.awsRequestId
   const started = Date.now()
 
+  const { pageSize, error: pageSizeError } = readPageSize(event)
+  if (pageSizeError) {
+    console.warn(JSON.stringify({ requestId, status: 400, errorCode: pageSizeError }))
+    return errorResponse(400, pageSizeError, 'X-Pdf-Page-Size must be "css" or absent.', requestId)
+  }
+
   const input = readHtml(event)
   if (input.error === 'HTML_REQUIRED') {
     console.warn(JSON.stringify({ requestId, status: 400, errorCode: input.error }))
@@ -135,10 +167,11 @@ export const handler = async (event, context) => {
   }
 
   try {
-    const { pdf, blockedRequests, fontRequests } = await renderPdf(input.html)
+    const { pdf, blockedRequests, fontRequests } = await renderPdf(input.html, PDF_OPTIONS_BY_PAGE_SIZE[pageSize])
     console.info(JSON.stringify({
       requestId,
       status: 200,
+      pageSize,
       htmlBytes: input.bytes,
       pdfBytes: pdf.length,
       blockedRequests,
