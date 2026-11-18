@@ -11,8 +11,37 @@ const MAX_HTML_BYTES = 4 * 1024 * 1024
 // Time left for Chromium to render, below the function timeout (25 s) and API Gateway's 29 s limit.
 const RENDER_TIMEOUT_MS = 20000
 
-// Only inline content may load: every network, file or other scheme request is aborted.
+// Inline content always loads. The only network requests allowed are Google Fonts over https,
+// which main-api invoice templates @import; every other network, file or scheme request is aborted.
 const ALLOWED_URL_PREFIXES = ['data:', 'about:']
+const ALLOWED_FONT_HOSTS = {
+  'fonts.googleapis.com': 'stylesheet',
+  'fonts.gstatic.com': 'font',
+}
+
+// Redirects reach this check again as new requests, so a redirect to another host is aborted too.
+function isAllowedRequest(request) {
+  const url = request.url()
+  if (ALLOWED_URL_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    return { allowed: true, external: false }
+  }
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { allowed: false }
+  }
+  const allowedResourceType = Object.hasOwn(ALLOWED_FONT_HOSTS, parsed.hostname) ? ALLOWED_FONT_HOSTS[parsed.hostname] : null
+  const allowed =
+    parsed.protocol === 'https:' &&
+    parsed.port === '' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    request.method() === 'GET' &&
+    allowedResourceType !== null &&
+    request.resourceType() === allowedResourceType
+  return { allowed, external: allowed }
+}
 
 // Viewport chrome-aws-lambda used as its default, kept so page layout does not change.
 const VIEWPORT = {
@@ -57,6 +86,7 @@ function readHtml(event) {
 async function renderPdf(html) {
   let browser = null
   let blockedRequests = 0
+  let fontRequests = 0
   try {
     browser = await puppeteer.launch({
       args: await puppeteer.defaultArgs({ args: chromium.args, headless: 'shell' }),
@@ -69,7 +99,11 @@ async function renderPdf(html) {
     await page.setJavaScriptEnabled(false)
     await page.setRequestInterception(true)
     page.on('request', (request) => {
-      if (ALLOWED_URL_PREFIXES.some((prefix) => request.url().startsWith(prefix))) {
+      const { allowed, external } = isAllowedRequest(request)
+      if (allowed) {
+        if (external) {
+          fontRequests += 1
+        }
         request.continue()
       } else {
         blockedRequests += 1
@@ -78,7 +112,7 @@ async function renderPdf(html) {
     })
     await page.setContent(html)
     const pdf = await page.pdf(PDF_OPTIONS)
-    return { pdf: Buffer.from(pdf), blockedRequests }
+    return { pdf: Buffer.from(pdf), blockedRequests, fontRequests }
   } finally {
     if (browser !== null) {
       await browser.close()
@@ -101,13 +135,14 @@ export const handler = async (event, context) => {
   }
 
   try {
-    const { pdf, blockedRequests } = await renderPdf(input.html)
+    const { pdf, blockedRequests, fontRequests } = await renderPdf(input.html)
     console.info(JSON.stringify({
       requestId,
       status: 200,
       htmlBytes: input.bytes,
       pdfBytes: pdf.length,
       blockedRequests,
+      fontRequests,
       durationMs: Date.now() - started,
     }))
     return {
