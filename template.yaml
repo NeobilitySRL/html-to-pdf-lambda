@@ -31,12 +31,15 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: app.handler
-      Runtime: nodejs12.x
-      Timeout: 15
+      Runtime: nodejs24.x
+      # @sparticuz/chromium's npm package ships only x86_64 Chromium binaries
+      Architectures:
+        - x86_64
+      # Below API Gateway's 29 s integration timeout
+      Timeout: 25
       MemorySize: 3008
-
-      Layers:
-        - !Sub 'arn:aws:lambda:${AWS::Region}:764866452798:layer:chrome-aws-lambda:22'
+      LoggingConfig:
+        LogGroup: !Ref PdfFunctionLogGroup
       # Environment:
       #   Variables:
       #     EXAMPLE_ENV: 'CHANGE_THIS'
@@ -50,6 +53,42 @@ Resources:
               ApiKeyRequired: true
             RestApiId:
               Ref: ApiGatewayApi
+
+  PdfFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}'
+      RetentionInDays: 30
+
+  # One API key per caller and environment, all on the API's usage plan.
+  # Values are copied to SSM Parameter Store (SecureString) outside this template.
+  NeoTransportApiDevApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-neo-transport-api-dev'
+      Description: neo-transport-api dev, value in SSM /neoride/dev/neo-transport-api/HTML_TO_PDF_API_KEY
+      Enabled: true
+
+  NeoTransportApiDevUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref NeoTransportApiDevApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiGatewayApiUsagePlan
+
+  NeoTransportApiProductionApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-neo-transport-api-production'
+      Description: neo-transport-api production, value in SSM /neoride/production/neo-transport-api/HTML_TO_PDF_API_KEY
+      Enabled: true
+
+  NeoTransportApiProductionUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref NeoTransportApiProductionApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiGatewayApiUsagePlan
 Outputs:
   ApiGatewayApi:
     Description: "The URL is:"
@@ -58,3 +97,9 @@ Outputs:
   ApiKey:
     Description: "You can find your API Key in the AWS console: (Put in the request HEADER as 'x-api-key')"
     Value: !Sub "https://console.aws.amazon.com/apigateway/home?region=${AWS::Region}#/api-keys/"
+  NeoTransportApiDevApiKeyId:
+    Description: API key id for neo-transport-api dev (value only in SSM)
+    Value: !Ref NeoTransportApiDevApiKey
+  NeoTransportApiProductionApiKeyId:
+    Description: API key id for neo-transport-api production (value only in SSM)
+    Value: !Ref NeoTransportApiProductionApiKey

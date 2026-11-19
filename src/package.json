@@ -1,0 +1,15 @@
+{
+  "name": "html-to-pdf",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Renders an HTML body to an A4 PDF with Chromium on AWS Lambda",
+  "type": "module",
+  "main": "app.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "153.0.0",
+    "puppeteer-core": "25.11.0"
+  }
+}
